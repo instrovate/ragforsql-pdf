@@ -1,0 +1,5 @@
+openai
+llama-index==0.10.43
+sqlalchemy
+streamlit
+pymupdf
