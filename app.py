@@ -1,99 +1,66 @@
-
 import streamlit as st
-import os
-from llama_index import (
-    VectorStoreIndex,
-    SimpleDirectoryReader,
-    ServiceContext,
-    SQLDatabase,
-    StorageContext,
+from llama_index.core import (
+    VectorStoreIndex, SimpleDirectoryReader, StorageContext, load_index_from_storage
 )
-from llama_index.query_engine import RouterQueryEngine
-from llama_index.tools import QueryEngineTool
-from llama_index.llms import OpenAI
+from llama_index.readers.file import PDFReader
+from llama_index.readers.database import SQLDatabaseReader
 from sqlalchemy import create_engine
+import os
 
-# Set OpenAI Key (replace with your own)
-os.environ["OPENAI_API_KEY"] = "your-openai-key"
+st.set_page_config(page_title="RAG on SQL + PDF", layout="wide")
 
-# Title
-st.title("🔄 Hybrid RAG App – SQL + PDF")
-st.markdown("Ask a question and get answers from structured (SQLite) and unstructured (PDF) data using GPT.")
+st.title("🔍 RAG App: Query Your Data from SQL + PDF")
 
-# Let user choose to upload or use sample data
-use_sample = st.checkbox("Use preloaded sample data from GitHub (example.db + example.pdf)", value=True)
+st.markdown("Use your own `.pdf` or `.db` file, or try the sample files below!")
 
-# File upload
-if not use_sample:
-    uploaded_pdf = st.file_uploader("Upload a PDF file", type=["pdf"])
-    uploaded_db = st.file_uploader("Upload a SQLite DB file", type=["db"])
+use_sample = st.checkbox("Use preloaded sample PDF and SQLite DB (from GitHub)", value=True)
+
+if use_sample:
+    pdf_path = "example.pdf"
+    db_path = "example.db"
 else:
-    uploaded_pdf = "data/pdf/example.pdf"
-    uploaded_db = "data/example.db"
+    uploaded_pdf = st.file_uploader("Upload your PDF", type=["pdf"])
+    uploaded_db = st.file_uploader("Upload your SQLite DB", type=["db"])
 
-# Load services only if files are ready
-if uploaded_pdf and uploaded_db:
-
-    # Handle uploaded PDF saving
-    if not use_sample:
-        os.makedirs("data/pdf", exist_ok=True)
-        pdf_path = os.path.join("data/pdf", uploaded_pdf.name)
+    if uploaded_pdf:
+        pdf_path = os.path.join("temp", uploaded_pdf.name)
         with open(pdf_path, "wb") as f:
             f.write(uploaded_pdf.read())
-    else:
-        pdf_path = uploaded_pdf
 
-    # Handle uploaded DB saving
-    if not use_sample:
-        os.makedirs("data", exist_ok=True)
-        db_path = os.path.join("data", uploaded_db.name)
+    if uploaded_db:
+        db_path = os.path.join("temp", uploaded_db.name)
         with open(db_path, "wb") as f:
             f.write(uploaded_db.read())
-    else:
-        db_path = uploaded_db
 
-    # Setup LLM
-    service_context = ServiceContext.from_defaults(llm=OpenAI(model="gpt-4"))
+if ("pdf_path" in locals() and os.path.exists(pdf_path)) and ("db_path" in locals() and os.path.exists(db_path)):
+    if st.button("🔎 Index & Preview Data"):
+        # Display preview
+        st.success(f"Using PDF: {pdf_path}")
+        st.success(f"Using DB: {db_path}")
 
-    # PDF RAG tool
-    documents = SimpleDirectoryReader("data/pdf").load_data()
-    pdf_index = VectorStoreIndex.from_documents(documents, service_context=service_context)
-    pdf_tool = QueryEngineTool.from_defaults(
-        query_engine=pdf_index.as_query_engine(), name="PDF_RAG", description="PDF-based retrieval"
-    )
+        # Index PDF
+        pdf_docs = PDFReader().load_data(file=pdf_path)
+        pdf_index = VectorStoreIndex.from_documents(pdf_docs)
 
-    # SQL RAG tool
-    engine = create_engine(f"sqlite:///{db_path}")
-    sql_db = SQLDatabase(engine)
-    sql_tool = QueryEngineTool.from_defaults(
-        query_engine=sql_db.as_query_engine(), name="SQL_RAG", description="SQL-based retrieval"
-    )
+        # Index SQLite DB
+        db_engine = create_engine(f"sqlite:///{db_path}")
+        db_reader = SQLDatabaseReader(db_engine)
+        db_docs = db_reader.load_data()
+        db_index = VectorStoreIndex.from_documents(db_docs)
 
-    # Router engine
-    router = RouterQueryEngine.from_defaults(
-        tools=[pdf_tool, sql_tool], service_context=service_context
-    )
+        st.session_state["pdf_index"] = pdf_index
+        st.session_state["db_index"] = db_index
 
-    # Optional preview
-    if st.checkbox("Preview PDF text"):
-        st.markdown("Sample content from uploaded PDF:")
-        with open(pdf_path, "rb") as file:
-            st.text(file.read().decode("latin1")[:1000])
+prompt = st.text_input("Ask a question about your data:")
 
-    if st.checkbox("Preview SQL table"):
-        st.markdown("Showing first 5 rows of the `financials` table:")
-        import sqlite3
-        conn = sqlite3.connect(db_path)
-        df = conn.execute("SELECT * FROM financials LIMIT 5").fetchall()
-        st.table(df)
-        conn.close()
+if prompt and "pdf_index" in st.session_state and "db_index" in st.session_state:
+    combined_response = ""
 
-    # Ask question
-    st.markdown("## 🔍 Ask a Question")
-    question = st.text_input("Your question")
+    with st.spinner("Thinking..."):
+        pdf_response = st.session_state["pdf_index"].as_query_engine().query(prompt)
+        db_response = st.session_state["db_index"].as_query_engine().query(prompt)
+        combined_response = f"📄 **From PDF**: {pdf_response}
 
-    if question:
-        with st.spinner("Retrieving..."):
-            response = router.query(question)
-            st.success("Answer:")
-            st.write(response.response)
+🗄️ **From SQL DB**: {db_response}"
+
+    st.markdown(combined_response)
