@@ -1,5 +1,6 @@
-openai
+streamlit==1.26.0
 llama-index==0.10.43
+openai
+pandas
 sqlalchemy
-streamlit
-pymupdf
+PyMuPDF==1.23.7
