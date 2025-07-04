@@ -1,24 +1,23 @@
 import streamlit as st
-from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, StorageContext, load_index_from_storage
+from llama_index.core import VectorStoreIndex, Document
 from llama_index.readers.file import PDFReader
-from llama_index.readers.database import DatabaseReader
-from sqlalchemy import create_engine
+import pandas as pd
+import sqlite3
 import os
 
-# Set page config
 st.set_page_config(page_title="Hybrid RAG: SQL + PDF", layout="wide")
-
 st.title("🔍 Hybrid RAG Demo: Query SQL + PDF with LLM")
 
-# Option to load sample files
-use_sample = st.checkbox("Use sample database and PDF")
+# Use sample option
+use_sample = st.checkbox("Use sample files")
 
 if use_sample:
     db_path = "example.db"
     pdf_path = "example.pdf"
 else:
-    uploaded_db = st.file_uploader("Upload a SQLite database (.db)", type=["db"])
-    uploaded_pdf = st.file_uploader("Upload a PDF file", type=["pdf"])
+    uploaded_db = st.file_uploader("Upload SQLite database (.db)", type=["db"])
+    uploaded_pdf = st.file_uploader("Upload PDF file", type=["pdf"])
+
     if uploaded_db and uploaded_pdf:
         db_path = uploaded_db.name
         pdf_path = uploaded_pdf.name
@@ -27,23 +26,30 @@ else:
         with open(pdf_path, "wb") as f:
             f.write(uploaded_pdf.read())
     else:
-        st.warning("Please upload both a PDF and a .db file or select 'Use sample'.")
+        st.warning("Please upload both a .db and .pdf file or select sample.")
         st.stop()
 
-# Load SQL
-engine = create_engine(f"sqlite:///{db_path}")
-sql_reader = DatabaseReader(engine=engine)
-sql_docs = sql_reader.load_data()
+# --- Custom SQL loader ---
+def load_sql_docs(path):
+    conn = sqlite3.connect(path)
+    cursor = conn.cursor()
+    tables = cursor.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchall()
+    docs = []
+    for (table_name,) in tables:
+        df = pd.read_sql_query(f"SELECT * FROM {table_name} LIMIT 100", conn)
+        doc_text = f"Table: {table_name}\n{df.to_markdown(index=False)}"
+        docs.append(Document(text=doc_text))
+    conn.close()
+    return docs
 
-# Load PDF
-pdf_loader = PDFReader()
-pdf_docs = pdf_loader.load_data(file=pdf_path)
-
-# Combine
+# Load SQL & PDF
+sql_docs = load_sql_docs(db_path)
+pdf_docs = PDFReader().load_data(file=pdf_path)
 all_docs = sql_docs + pdf_docs
+
 index = VectorStoreIndex.from_documents(all_docs)
 
-query = st.text_input("Ask a question about the data")
+query = st.text_input("Ask your question")
 
 if query:
     with st.spinner("Thinking..."):
