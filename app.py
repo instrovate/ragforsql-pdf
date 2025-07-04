@@ -4,7 +4,7 @@ import sqlite3
 import pandas as pd
 from sqlalchemy import create_engine, inspect
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, ServiceContext
-from llama_index.core.llms import OpenAI
+from llama_index.llms import OpenAI
 from llama_index.core.readers.file import PDFReader
 from llama_index.core.query_engine import SubQuestionQueryEngine
 from llama_index.core.tools import QueryEngineTool, ToolMetadata
