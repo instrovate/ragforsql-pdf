@@ -1,4 +1,4 @@
-streamlit
 llama-index==0.10.43
 sqlalchemy
-pypdf
+pandas
+streamlit
